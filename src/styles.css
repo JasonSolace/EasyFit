@@ -1,0 +1,700 @@
+:root {
+  color-scheme: light;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f6f4ef;
+  color: #1f2523;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.app-shell {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.topbar h1,
+.daily-header h2 {
+  margin: 0;
+  font-size: clamp(1.45rem, 2vw, 2.15rem);
+  letter-spacing: 0;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: #69716f;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.entry-actions,
+.side-actions,
+.meal-progress,
+.photo-row,
+.barcode-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.sidebar,
+.content {
+  display: grid;
+  gap: 14px;
+}
+
+.panel,
+.entry-card,
+.metric-card {
+  background: #fffefa;
+  border: 1px solid #dedbd1;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(36, 42, 38, 0.06);
+}
+
+.panel {
+  padding: 14px;
+}
+
+.calendar-header,
+.section-title,
+.daily-header,
+.entry-main,
+.metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendar-header h2,
+.section-title h3,
+.entry-card h3,
+.empty-state h3 {
+  margin: 0;
+}
+
+.section-title span,
+.muted-text,
+.entry-meta,
+.entry-card p,
+.review-block span,
+.metric-card span {
+  color: #69716f;
+}
+
+.weekday-grid,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.weekday-grid {
+  margin: 12px 0 6px;
+  color: #69716f;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.day-cell {
+  min-height: 42px;
+  border: 1px solid #e4e0d7;
+  border-radius: 8px;
+  background: #faf7f0;
+  display: grid;
+  place-items: center;
+  position: relative;
+}
+
+.day-cell.muted {
+  color: #a7aaa4;
+  background: #f3f1ec;
+}
+
+.day-cell.future {
+  color: #b4b5b0;
+  background: #ebe8e1;
+  border-color: #e0ddd4;
+}
+
+.day-cell.selected {
+  color: #fff;
+  background: #27594d;
+  border-color: #27594d;
+}
+
+.day-cell.logged:not(.selected) {
+  border-color: #78a77b;
+}
+
+.day-cell i {
+  position: absolute;
+  right: 5px;
+  bottom: 2px;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.icon-button,
+.icon-only,
+.tab,
+.secondary-button,
+.entry-actions button,
+.settings-popover button,
+.manual-barcode button {
+  border: 1px solid #d8d4ca;
+  background: #fffefa;
+  color: #1f2523;
+  border-radius: 8px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 11px;
+}
+
+.icon-only {
+  width: 38px;
+  padding: 0;
+}
+
+.settings-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.settings-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 15;
+  width: min(280px, calc(100vw - 24px));
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: #fffefa;
+  border: 1px solid #dedbd1;
+  border-radius: 8px;
+  box-shadow: 0 18px 36px rgba(36, 42, 38, 0.16);
+}
+
+.settings-popover h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.settings-popover button {
+  justify-content: flex-start;
+}
+
+.settings-popover p:last-child {
+  margin: 4px 0 0;
+  color: #69716f;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.tab {
+  width: 100%;
+  justify-content: flex-start;
+  background: #f7f4ed;
+}
+
+.tab.active {
+  background: #27594d;
+  color: #fff;
+  border-color: #27594d;
+}
+
+.metric-row {
+  justify-content: flex-start;
+}
+
+.metric-row strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.daily-header {
+  align-items: flex-start;
+}
+
+.meal-chip {
+  flex: 1 1 100px;
+  min-height: 62px;
+  display: grid;
+  gap: 3px;
+  place-items: center;
+  border: 1px dashed #b9b4aa;
+  border-radius: 8px;
+  background: #fffefa;
+  color: #69716f;
+  padding: 8px 10px;
+}
+
+.meal-chip.done {
+  border-style: solid;
+  border-color: #568a62;
+  background: #edf7ed;
+  color: #235236;
+  font-weight: 800;
+}
+
+.meal-chip strong {
+  color: #1f2523;
+  font-size: 0.98rem;
+}
+
+.meal-chip.done strong {
+  color: #235236;
+}
+
+.meal-chip span {
+  font-size: 0.8rem;
+}
+
+.weight-grid,
+.form-grid,
+.review-grid,
+.metrics-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.weight-grid {
+  grid-template-columns: minmax(180px, 280px);
+  margin-top: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: #4d5753;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid #d9d5cc;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2523;
+  min-height: 40px;
+  padding: 9px 10px;
+}
+
+textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.notice {
+  margin: 10px 0 0;
+  padding: 10px 11px;
+  border-radius: 8px;
+  background: #eef5f1;
+  color: #31584b;
+}
+
+.notice.warn {
+  background: #fff4dc;
+  color: #825a0b;
+}
+
+.entry-form-panel {
+  border-color: #c6d4ca;
+  box-shadow: none;
+}
+
+.entry-form {
+  margin-top: 12px;
+}
+
+.entry-form-title-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.time-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.time-picker select {
+  min-width: 0;
+}
+
+.form-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.wide {
+  grid-column: span 2;
+}
+
+.barcode-row {
+  align-items: end;
+}
+
+.barcode-row label {
+  flex: 1 1 220px;
+}
+
+.workout-builder {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dedbd1;
+  border-radius: 8px;
+  background: #f7f4ed;
+}
+
+.exercise-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 2fr) repeat(4, minmax(76px, 1fr)) minmax(180px, 2fr) 38px;
+  gap: 8px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid #dedbd1;
+  border-radius: 8px;
+  background: #fffefa;
+}
+
+.exercise-remove {
+  margin-bottom: 1px;
+}
+
+.primary-button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #27594d;
+  color: white;
+  font-weight: 800;
+}
+
+.file-button {
+  min-height: 42px;
+  border: 1px dashed #aaa59b;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.file-button input {
+  display: none;
+}
+
+.photo-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.photo-preview img,
+.entry-photo {
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #ddd8cf;
+}
+
+.range-value {
+  font-weight: 800;
+  color: #27594d;
+}
+
+.entry-list {
+  display: grid;
+  gap: 10px;
+}
+
+.entry-card {
+  padding: 14px;
+  border-left: 5px solid #81968a;
+}
+
+.type-snack {
+  border-left-color: #bf7c30;
+}
+
+.type-craving {
+  border-left-color: #a8485a;
+}
+
+.type-drink {
+  border-left-color: #447ea0;
+}
+
+.type-workout,
+.type-activity {
+  border-left-color: #5d70b0;
+}
+
+.entry-main {
+  align-items: flex-start;
+}
+
+.entry-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+
+.entry-card h3 {
+  margin-top: 6px;
+}
+
+.entry-card p {
+  margin: 7px 0;
+}
+
+.nutrition-line {
+  color: #31584b;
+  font-weight: 800;
+  font-size: 0.88rem;
+}
+
+.workout-summary {
+  display: grid;
+  gap: 6px;
+}
+
+.workout-summary p {
+  margin: 0;
+}
+
+.exercise-summary-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.exercise-summary-list span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: #eef1f7;
+  color: #34456f;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.entry-actions {
+  margin-top: 10px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 36px 18px;
+  color: #69716f;
+}
+
+.metrics-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.metric-card {
+  padding: 14px;
+}
+
+.metric-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.55rem;
+}
+
+.review-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.review-block {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7f4ed;
+}
+
+.review-block strong {
+  display: block;
+  margin-top: 6px;
+}
+
+.suggestion-list {
+  display: grid;
+  gap: 8px;
+}
+
+.suggestion-list p {
+  margin: 0;
+  padding: 11px;
+  border-radius: 8px;
+  background: #eef5f1;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(20, 25, 23, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.entry-modal {
+  width: min(920px, 100%);
+  max-height: min(92vh, 920px);
+  overflow: auto;
+  border-radius: 8px;
+}
+
+.scanner-modal {
+  width: min(560px, 100%);
+  background: #fffefa;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.scanner-modal video {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #1f2523;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.manual-barcode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .weight-grid,
+  .form-grid,
+  .metrics-grid,
+  .review-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .topbar,
+  .daily-header,
+  .entry-main {
+    display: grid;
+  }
+
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .settings-menu {
+    justify-self: end;
+  }
+
+  .icon-button {
+    flex: 1 1 120px;
+  }
+
+  .weight-grid,
+  .form-grid,
+  .metrics-grid,
+  .review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wide {
+    grid-column: span 1;
+  }
+
+  .manual-barcode {
+    grid-template-columns: 1fr;
+  }
+
+  .exercise-row {
+    grid-template-columns: 1fr;
+  }
+
+  .entry-photo {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 4 / 3;
+  }
+}
