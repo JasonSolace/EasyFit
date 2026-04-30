@@ -277,7 +277,7 @@ function makeWorkoutTemplate(entry) {
       reps: exercise.reps ?? '',
       weight: '',
       unit: exercise.unit || 'lb',
-      notes: exercise.notes || ''
+      notes: ''
     }))
   };
 }
@@ -293,7 +293,8 @@ function applyWorkoutTemplate(form, template) {
     exercises: (template.exercises || []).map((exercise) => ({
       ...exercise,
       id: crypto.randomUUID(),
-      weight: ''
+      weight: '',
+      notes: ''
     }))
   };
 }
@@ -313,7 +314,6 @@ function makeFoodTemplate(entry) {
     sugar: entry.sugar ?? '',
     brand: entry.brand || '',
     servingSize: entry.servingSize || '',
-    notes: entry.notes || '',
     barcode: entry.barcode || '',
     importedFrom: entry.importedFrom || ''
   };
@@ -332,7 +332,7 @@ function applyFoodTemplate(form, template) {
     sugar: template.sugar ?? '',
     brand: template.brand || '',
     servingSize: template.servingSize || '',
-    notes: template.notes || '',
+    notes: '',
     barcode: template.barcode || '',
     importedFrom: template.importedFrom || ''
   };
@@ -898,6 +898,30 @@ function TimePicker({ value, onChange }) {
 
 function EntryForm({ form, editingEntry, workoutTemplates, foodTemplates, onChange, onSubmit, onClose, onImportProduct }) {
   const [showScanner, setShowScanner] = React.useState(false);
+  const descriptionQuery = form.description.trim().toLowerCase();
+  const matchingWorkoutTemplates =
+    form.type === 'workout' && descriptionQuery
+      ? workoutTemplates.filter(
+          (template) =>
+            template.name.toLowerCase().startsWith(descriptionQuery) &&
+            template.name.toLowerCase() !== descriptionQuery
+        )
+      : [];
+  const matchingFoodTemplates =
+    form.type !== 'workout' && form.type !== 'craving' && descriptionQuery
+      ? foodTemplates.filter(
+          (template) =>
+            template.type === form.type &&
+            template.name.toLowerCase().startsWith(descriptionQuery) &&
+            template.name.toLowerCase() !== descriptionQuery
+        )
+      : [];
+  const descriptionListId =
+    matchingWorkoutTemplates.length > 0
+      ? 'saved-workouts'
+      : matchingFoodTemplates.length > 0
+        ? `saved-foods-${form.type}`
+        : undefined;
 
   function update(field, value) {
     onChange((current) => ({ ...current, [field]: value }));
@@ -963,13 +987,7 @@ function EntryForm({ form, editingEntry, workoutTemplates, foodTemplates, onChan
           <label className="wide">
             {form.type === 'craving' ? 'Craving description' : form.type === 'workout' ? 'Workout name' : 'Description'}
             <input
-              list={
-                form.type === 'workout'
-                  ? 'saved-workouts'
-                  : form.type !== 'craving'
-                    ? `saved-foods-${form.type}`
-                    : undefined
-              }
+              list={descriptionListId}
               value={form.description}
               onChange={(event) => handleDescriptionChange(event.target.value)}
               placeholder={
@@ -981,20 +999,18 @@ function EntryForm({ form, editingEntry, workoutTemplates, foodTemplates, onChan
               }
               required
             />
-            {form.type === 'workout' && (
+            {matchingWorkoutTemplates.length > 0 && (
               <datalist id="saved-workouts">
-                {workoutTemplates.map((template) => (
+                {matchingWorkoutTemplates.map((template) => (
                   <option key={template.id} value={template.name} />
                 ))}
               </datalist>
             )}
-            {form.type !== 'workout' && form.type !== 'craving' && (
+            {matchingFoodTemplates.length > 0 && (
               <datalist id={`saved-foods-${form.type}`}>
-                {foodTemplates
-                  .filter((template) => template.type === form.type)
-                  .map((template) => (
-                    <option key={template.id} value={template.name} />
-                  ))}
+                {matchingFoodTemplates.map((template) => (
+                  <option key={template.id} value={template.name} />
+                ))}
               </datalist>
             )}
           </label>
