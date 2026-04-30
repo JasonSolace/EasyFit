@@ -17,8 +17,16 @@ import {
 } from 'lucide-react';
 import './styles.css';
 
-const STORAGE_KEY = 'plate-planner-data-v1';
-const PRODUCT_CACHE_KEY = 'plate-planner-product-cache-v1';
+const STORAGE_KEY = 'easyfit-data-v1';
+const PRODUCT_CACHE_KEY = 'easyfit-product-cache-v1';
+const LEGACY_STORAGE_KEY = 'plate-planner-data-v1';
+const LEGACY_PRODUCT_CACHE_KEY = 'plate-planner-product-cache-v1';
+const GOOGLE_DRIVE_FILE_ID_KEY = 'easyfit-google-drive-file-id-v1';
+const LEGACY_GOOGLE_DRIVE_FILE_ID_KEY = 'plate-planner-google-drive-file-id-v1';
+const GOOGLE_DRIVE_BACKUP_NAME = 'EasyFit Backup.json';
+const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const BUILT_IN_GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const AUTO_BACKUP_DELAY_MS = 1800;
 const BARCODE_PROVIDERS = [
   {
     id: 'open-food-facts',
@@ -127,6 +135,21 @@ function loadJson(key, fallback) {
     return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
+  }
+}
+
+function migrateLegacyStorage() {
+  if (!localStorage.getItem(STORAGE_KEY)) {
+    const legacyData = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyData) localStorage.setItem(STORAGE_KEY, legacyData);
+  }
+  if (!localStorage.getItem(PRODUCT_CACHE_KEY)) {
+    const legacyCache = localStorage.getItem(LEGACY_PRODUCT_CACHE_KEY);
+    if (legacyCache) localStorage.setItem(PRODUCT_CACHE_KEY, legacyCache);
+  }
+  if (!localStorage.getItem(GOOGLE_DRIVE_FILE_ID_KEY)) {
+    const legacyDriveFileId = localStorage.getItem(LEGACY_GOOGLE_DRIVE_FILE_ID_KEY);
+    if (legacyDriveFileId) localStorage.setItem(GOOGLE_DRIVE_FILE_ID_KEY, legacyDriveFileId);
   }
 }
 
@@ -402,6 +425,7 @@ function analyzeWeek(data, selectedDate) {
 }
 
 function App() {
+  migrateLegacyStorage();
   const [data, setData] = React.useState(() => loadJson(STORAGE_KEY, emptyData));
   const [selectedDate, setSelectedDate] = React.useState(todayKey());
   const [visibleMonth, setVisibleMonth] = React.useState(() => fromDateKey(todayKey()));
@@ -410,6 +434,13 @@ function App() {
   const [entryForm, setEntryForm] = React.useState(() => newEntryForm());
   const [isEntryModalOpen, setIsEntryModalOpen] = React.useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
+  const [driveAccessToken, setDriveAccessToken] = React.useState('');
+  const [driveStatus, setDriveStatus] = React.useState('');
+  const [isDriveBusy, setIsDriveBusy] = React.useState(false);
+  const driveTokenRef = React.useRef('');
+  const driveTokenExpiresAtRef = React.useRef(0);
+  const autoBackupTimerRef = React.useRef(0);
+  const hasMountedRef = React.useRef(false);
   const day = getDay(data, selectedDate);
   const workoutTemplates = data.workoutTemplates || [];
   const foodTemplates = data.foodTemplates || [];
@@ -417,7 +448,18 @@ function App() {
 
   React.useEffect(() => {
     saveJson(STORAGE_KEY, data);
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    scheduleAutoBackup();
   }, [data]);
+
+  React.useEffect(() => {
+    return () => {
+      window.clearTimeout(autoBackupTimerRef.current);
+    };
+  }, []);
 
   function updateDay(dateKey, updater) {
     setData((current) => {
@@ -545,7 +587,7 @@ function App() {
   }
 
   function exportData(kind) {
-    const filename = `plate-planner-${todayKey()}.${kind}`;
+    const filename = `easyfit-${todayKey()}.${kind}`;
     const text = kind === 'json' ? JSON.stringify(data, null, 2) : toCsv(data);
     const blob = new Blob([text], { type: kind === 'json' ? 'application/json' : 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -556,12 +598,100 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
+  function rememberDriveToken(token, expiresInSeconds = 3600) {
+    driveTokenRef.current = token;
+    driveTokenExpiresAtRef.current = Date.now() + Math.max(60, expiresInSeconds - 60) * 1000;
+    setDriveAccessToken(token);
+  }
+
+  function isDriveTokenValid() {
+    return Boolean(driveTokenRef.current) && Date.now() < driveTokenExpiresAtRef.current;
+  }
+
+  async function connectGoogleDrive() {
+    if (!BUILT_IN_GOOGLE_CLIENT_ID) {
+      setDriveStatus('Google Drive is not configured for this install yet.');
+      return;
+    }
+
+    setIsDriveBusy(true);
+    setDriveStatus('Opening Google sign-in...');
+    try {
+      const tokenResponse = await requestGoogleAccessToken(BUILT_IN_GOOGLE_CLIENT_ID, 'consent');
+      rememberDriveToken(tokenResponse.access_token, tokenResponse.expires_in);
+      setDriveStatus('Connected. Saving first backup...');
+      const file = await saveDriveBackup(tokenResponse.access_token, data);
+      localStorage.setItem(GOOGLE_DRIVE_FILE_ID_KEY, file.id);
+      setDriveStatus(`Connected. Auto backup is on. Last backup: ${new Date().toLocaleTimeString()}.`);
+    } catch (error) {
+      setDriveStatus(error.message || 'Google Drive connection failed.');
+    } finally {
+      setIsDriveBusy(false);
+    }
+  }
+
+  function scheduleAutoBackup() {
+    if (!isDriveTokenValid()) return;
+    window.clearTimeout(autoBackupTimerRef.current);
+    autoBackupTimerRef.current = window.setTimeout(() => {
+      autoBackupToGoogleDrive();
+    }, AUTO_BACKUP_DELAY_MS);
+  }
+
+  async function autoBackupToGoogleDrive() {
+    if (!isDriveTokenValid() || isDriveBusy) return;
+
+    setIsDriveBusy(true);
+    setDriveStatus('Auto backup in progress...');
+    try {
+      const token = driveTokenRef.current;
+      const file = await saveDriveBackup(token, data);
+      localStorage.setItem(GOOGLE_DRIVE_FILE_ID_KEY, file.id);
+      setDriveStatus(`Auto backup complete at ${new Date().toLocaleTimeString()}.`);
+    } catch (error) {
+      setDriveStatus(error.message || 'Auto backup failed. Reconnect Google Drive if needed.');
+    } finally {
+      setIsDriveBusy(false);
+    }
+  }
+
+  async function restoreFromGoogleDrive() {
+    if (!BUILT_IN_GOOGLE_CLIENT_ID) {
+      setDriveStatus('Google Drive is not configured for this install yet.');
+      return;
+    }
+
+    const confirmed = window.confirm('Restore the latest Google Drive backup? This replaces the data on this device.');
+    if (!confirmed) return;
+
+    setIsDriveBusy(true);
+    setDriveStatus('Connecting to Google Drive...');
+    try {
+      const tokenResponse = isDriveTokenValid()
+        ? { access_token: driveTokenRef.current }
+        : await requestGoogleAccessToken(BUILT_IN_GOOGLE_CLIENT_ID, 'consent');
+      if (tokenResponse.expires_in) {
+        rememberDriveToken(tokenResponse.access_token, tokenResponse.expires_in);
+      }
+      setDriveStatus('Restoring backup...');
+      const restored = await loadDriveBackup(tokenResponse.access_token);
+      setData(normalizeRestoredData(restored));
+      setDriveStatus('Backup restored from Google Drive.');
+    } catch (error) {
+      setDriveStatus(error.message || 'Google Drive restore failed.');
+    } finally {
+      setIsDriveBusy(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Plate Planner</p>
-          <h1>Food log for awareness and consistency</h1>
+          <h1 className="app-title">
+            <span>EasyFit</span>
+            <small>Simple Tracking for Better Fitness</small>
+          </h1>
         </div>
         <SettingsMenu
           isOpen={isSettingsOpen}
@@ -570,6 +700,12 @@ function App() {
             exportData(kind);
             setIsSettingsOpen(false);
           }}
+          isGoogleDriveConfigured={Boolean(BUILT_IN_GOOGLE_CLIENT_ID)}
+          isGoogleDriveConnected={Boolean(driveAccessToken)}
+          driveStatus={driveStatus}
+          isDriveBusy={isDriveBusy}
+          onDriveConnect={connectGoogleDrive}
+          onDriveRestore={restoreFromGoogleDrive}
         />
       </header>
 
@@ -628,7 +764,17 @@ function App() {
   );
 }
 
-function SettingsMenu({ isOpen, onToggle, onExport }) {
+function SettingsMenu({
+  isOpen,
+  onToggle,
+  onExport,
+  isGoogleDriveConfigured,
+  isGoogleDriveConnected,
+  driveStatus,
+  isDriveBusy,
+  onDriveConnect,
+  onDriveRestore
+}) {
   const lastTouchToggleAtRef = React.useRef(0);
 
   function handlePointerDown(event) {
@@ -674,6 +820,28 @@ function SettingsMenu({ isOpen, onToggle, onExport }) {
             <Download size={17} />
             Export JSON
           </button>
+          <div className="settings-section">
+            <div>
+              <p className="eyebrow">Cloud backup</p>
+              <h2>Google Drive</h2>
+            </div>
+            <div className="settings-button-row">
+              <button disabled={isDriveBusy || !isGoogleDriveConfigured} onClick={onDriveConnect}>
+                {isGoogleDriveConnected ? 'Reconnect' : 'Connect'}
+              </button>
+              <button disabled={isDriveBusy || !isGoogleDriveConfigured} onClick={onDriveRestore}>
+                Restore
+              </button>
+            </div>
+            <p>
+              {driveStatus ||
+                (isGoogleDriveConfigured
+                  ? isGoogleDriveConnected
+                    ? 'Auto backup is enabled while Google Drive is connected.'
+                    : 'Connect Google Drive to enable automatic backup.'
+                  : 'Google Drive needs a configured OAuth client ID before users can connect.')}
+            </p>
+          </div>
           <p>Stored locally in this browser. Barcode products are cached locally after lookup or save.</p>
         </div>
       )}
@@ -1668,6 +1836,170 @@ async function lookupBarcode(code) {
   }
 
   return null;
+}
+
+function normalizeRestoredData(value) {
+  if (!value || typeof value !== 'object') {
+    throw new Error('The Google Drive backup was not valid EasyFit data.');
+  }
+
+  return {
+    ...emptyData,
+    ...value,
+    days: value.days && typeof value.days === 'object' ? value.days : {},
+    workoutTemplates: Array.isArray(value.workoutTemplates) ? value.workoutTemplates : [],
+    foodTemplates: Array.isArray(value.foodTemplates) ? value.foodTemplates : []
+  };
+}
+
+function loadGoogleIdentityScript() {
+  if (window.google?.accounts?.oauth2) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-google-identity]');
+    if (existing) {
+      existing.addEventListener('load', resolve, { once: true });
+      existing.addEventListener('error', () => reject(new Error('Could not load Google Identity Services.')), {
+        once: true
+      });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.dataset.googleIdentity = 'true';
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Could not load Google Identity Services.'));
+    document.head.appendChild(script);
+  });
+}
+
+async function requestGoogleAccessToken(clientId, prompt = '') {
+  await loadGoogleIdentityScript();
+
+  return new Promise((resolve, reject) => {
+    const tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: GOOGLE_DRIVE_SCOPE,
+      callback: (response) => {
+        if (response.error) {
+          reject(new Error(response.error_description || response.error));
+          return;
+        }
+        resolve(response);
+      }
+    });
+
+    tokenClient.requestAccessToken({ prompt });
+  });
+}
+
+async function saveDriveBackup(token, data) {
+  const localFileId = localStorage.getItem(GOOGLE_DRIVE_FILE_ID_KEY);
+  const file = localFileId ? await updateDriveFile(token, localFileId, data).catch(() => null) : null;
+  if (file) return file;
+
+  const existing = await findDriveBackup(token);
+  if (existing) {
+    return updateDriveFile(token, existing.id, data);
+  }
+
+  return createDriveFile(token, data);
+}
+
+async function loadDriveBackup(token) {
+  const localFileId = localStorage.getItem(GOOGLE_DRIVE_FILE_ID_KEY);
+  const file = localFileId ? { id: localFileId } : await findDriveBackup(token);
+  if (!file) throw new Error('No Google Drive backup file was found.');
+
+  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    localStorage.removeItem(GOOGLE_DRIVE_FILE_ID_KEY);
+    throw new Error('Could not download the Google Drive backup.');
+  }
+
+  return response.json();
+}
+
+async function findDriveBackup(token) {
+  const query = encodeURIComponent(`name='${GOOGLE_DRIVE_BACKUP_NAME}' and trashed=false`);
+  const fields = encodeURIComponent('files(id,name,modifiedTime)');
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${query}&spaces=drive&orderBy=modifiedTime desc&fields=${fields}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  if (!response.ok) return null;
+  const payload = await response.json();
+  return payload.files?.[0] || null;
+}
+
+function createDriveFile(token, data) {
+  return uploadDriveFile({
+    token,
+    method: 'POST',
+    url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime',
+    metadata: {
+      name: GOOGLE_DRIVE_BACKUP_NAME,
+      mimeType: 'application/json'
+    },
+    data
+  });
+}
+
+function updateDriveFile(token, fileId, data) {
+  return uploadDriveFile({
+    token,
+    method: 'PATCH',
+    url: `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=id,name,modifiedTime`,
+    metadata: {
+      name: GOOGLE_DRIVE_BACKUP_NAME,
+      mimeType: 'application/json'
+    },
+    data
+  });
+}
+
+async function uploadDriveFile({ token, method, url, metadata, data }) {
+  const boundary = `pattern_plate_${crypto.randomUUID()}`;
+  const body = new Blob(
+    [
+      `--${boundary}\r\n`,
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+      `${JSON.stringify(metadata)}\r\n`,
+      `--${boundary}\r\n`,
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+      `${JSON.stringify(data)}\r\n`,
+      `--${boundary}--`
+    ],
+    { type: `multipart/related; boundary=${boundary}` }
+  );
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`
+    },
+    body
+  });
+
+  if (!response.ok) {
+    throw new Error('Could not save the Google Drive backup.');
+  }
+
+  return response.json();
 }
 
 async function lookupOpenFoodFacts(code) {

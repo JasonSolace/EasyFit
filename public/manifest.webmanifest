@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Plate Planner",
-  "short_name": "Plate Planner",
+  "name": "EasyFit",
+  "short_name": "EasyFit",
   "description": "A local-first food log for awareness, consistency, and long-term weight loss habits.",
   "start_url": ".",
   "scope": ".",
