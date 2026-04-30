@@ -436,7 +436,8 @@ textarea {
   background: #f7f4ed;
 }
 
-.exercise-row {
+.exercise-row,
+.activity-row {
   display: grid;
   grid-template-columns: minmax(160px, 2fr) repeat(4, minmax(76px, 1fr)) minmax(180px, 2fr) 38px;
   gap: 8px;
@@ -445,6 +446,10 @@ textarea {
   border: 1px solid #dedbd1;
   border-radius: 8px;
   background: #fffefa;
+}
+
+.activity-row {
+  grid-template-columns: minmax(160px, 2fr) repeat(3, minmax(76px, 1fr)) minmax(180px, 2fr) 38px;
 }
 
 .exercise-remove {
@@ -778,7 +783,8 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .exercise-row {
+  .exercise-row,
+  .activity-row {
     grid-template-columns: 1fr;
   }
 

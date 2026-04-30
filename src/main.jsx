@@ -38,7 +38,7 @@ const BARCODE_PROVIDERS = [
 const ENTRY_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'drink', 'craving', 'workout', 'other'];
 const MAIN_MEALS = ['breakfast', 'lunch', 'dinner'];
 const PORTIONS = ['small', 'normal', 'large', 'extra large'];
-const WORKOUT_TYPES = ['strength', 'run / walk', 'cardio', 'mixed', 'mobility', 'other'];
+const WORKOUT_TYPES = ['strength', 'cardio', 'sport', 'mixed', 'mobility', 'other'];
 
 const emptyData = {
   days: {},
@@ -199,12 +199,59 @@ function normalizeExercise(exercise) {
   };
 }
 
+function normalizeActivity(activity) {
+  return {
+    id: activity.id || crypto.randomUUID(),
+    name: activity.name || '',
+    durationMinutes: activity.durationMinutes ?? '',
+    distanceMiles: activity.distanceMiles ?? '',
+    effort: activity.effort ?? '',
+    notes: activity.notes || ''
+  };
+}
+
+function normalizeWorkoutType(type) {
+  if (type === 'activity' || type === 'run / walk') return 'cardio';
+  return WORKOUT_TYPES.includes(type) ? type : 'other';
+}
+
 function cleanSetDetails(exercise) {
   return normalizeSetDetails(exercise).map((set) => ({
     id: set.id || crypto.randomUUID(),
     reps: numberOrNull(set.reps),
     weight: numberOrNull(set.weight)
   }));
+}
+
+function cleanActivity(activity) {
+  const normalized = normalizeActivity(activity);
+  return {
+    id: normalized.id,
+    name: normalized.name.trim(),
+    durationMinutes: numberOrNull(normalized.durationMinutes),
+    distanceMiles: numberOrNull(normalized.distanceMiles),
+    effort: numberOrNull(normalized.effort),
+    notes: normalized.notes.trim()
+  };
+}
+
+function getEntryActivities(entry) {
+  const activities = (entry.activities ?? []).map(normalizeActivity);
+  const workoutType = normalizeWorkoutType(entry.workoutType);
+  const hasLegacyActivityStats = entry.durationMinutes != null || entry.distanceMiles != null;
+
+  if (activities.length || !['cardio', 'sport', 'mixed'].includes(workoutType) || !hasLegacyActivityStats) {
+    return activities;
+  }
+
+  return [
+    normalizeActivity({
+      name: entry.workoutType === 'run / walk' ? 'Run / walk' : entry.description || 'Activity',
+      durationMinutes: entry.durationMinutes ?? '',
+      distanceMiles: entry.distanceMiles ?? '',
+      effort: entry.effort ?? ''
+    })
+  ];
 }
 
 function cleanEntry(form) {
@@ -252,7 +299,7 @@ function cleanEntry(form) {
       servingSize: '',
       barcode: '',
       importedFrom: '',
-      workoutType: form.workoutType,
+      workoutType: normalizeWorkoutType(form.workoutType),
       distanceMiles: numberOrNull(form.distanceMiles),
       durationMinutes: numberOrNull(form.durationMinutes),
       effort: Number(form.effort || 3),
@@ -267,7 +314,8 @@ function cleanEntry(form) {
           unit: exercise.unit || 'lb',
           notes: exercise.notes.trim(),
           setDetails: cleanSetDetails(exercise)
-        }))
+        })),
+      activities: (form.activities || []).filter((activity) => normalizeActivity(activity).name.trim()).map(cleanActivity)
     };
   }
 
@@ -302,11 +350,13 @@ function newEntryForm(type = 'breakfast') {
     distanceMiles: '',
     durationMinutes: '',
     effort: 3,
-    exercises: []
+    exercises: [],
+    activities: []
   };
 }
 
 function entryToForm(entry) {
+  const workoutType = normalizeWorkoutType(entry.workoutType);
   return {
     ...newEntryForm(entry.type === 'activity' ? 'workout' : entry.type),
     ...entry,
@@ -316,9 +366,11 @@ function entryToForm(entry) {
     carbs: entry.carbs ?? '',
     fat: entry.fat ?? '',
     sugar: entry.sugar ?? '',
-    distanceMiles: entry.distanceMiles ?? '',
-    durationMinutes: entry.durationMinutes ?? '',
-    exercises: (entry.exercises ?? []).map(normalizeExercise)
+    workoutType,
+    distanceMiles: ['mobility', 'other'].includes(workoutType) ? (entry.distanceMiles ?? '') : '',
+    durationMinutes: ['mobility', 'other'].includes(workoutType) ? (entry.durationMinutes ?? '') : '',
+    exercises: (entry.exercises ?? []).map(normalizeExercise),
+    activities: getEntryActivities(entry)
   };
 }
 
@@ -327,9 +379,9 @@ function makeWorkoutTemplate(entry) {
   return {
     id: entry.description.trim().toLowerCase(),
     name: entry.description.trim(),
-    workoutType: entry.workoutType || 'strength',
-    distanceMiles: entry.distanceMiles ?? '',
-    durationMinutes: entry.durationMinutes ?? '',
+    workoutType: normalizeWorkoutType(entry.workoutType || 'strength'),
+    distanceMiles: '',
+    durationMinutes: '',
     effort: entry.effort || 3,
     exercises: (entry.exercises || []).map((exercise) => ({
       id: crypto.randomUUID(),
@@ -343,6 +395,14 @@ function makeWorkoutTemplate(entry) {
         ...set,
         weight: ''
       }))
+    })),
+    activities: (entry.activities || []).map((activity) => ({
+      id: crypto.randomUUID(),
+      name: activity.name,
+      durationMinutes: '',
+      distanceMiles: '',
+      effort: activity.effort ?? '',
+      notes: ''
     }))
   };
 }
@@ -351,9 +411,9 @@ function applyWorkoutTemplate(form, template) {
   return {
     ...form,
     description: template.name,
-    workoutType: template.workoutType,
-    distanceMiles: template.distanceMiles ?? '',
-    durationMinutes: template.durationMinutes ?? '',
+    workoutType: normalizeWorkoutType(template.workoutType),
+    distanceMiles: '',
+    durationMinutes: '',
     effort: template.effort || form.effort,
     exercises: (template.exercises || []).map((exercise) => ({
       ...exercise,
@@ -365,6 +425,13 @@ function applyWorkoutTemplate(form, template) {
         id: crypto.randomUUID(),
         weight: ''
       }))
+    })),
+    activities: (template.activities || []).map((activity) => ({
+      ...normalizeActivity(activity),
+      id: crypto.randomUUID(),
+      durationMinutes: '',
+      distanceMiles: '',
+      notes: ''
     }))
   };
 }
@@ -1404,8 +1471,10 @@ function NutritionFields({ form, update }) {
 }
 
 function WorkoutFields({ form, update }) {
-  const showsDistance = ['run / walk', 'cardio', 'mixed'].includes(form.workoutType);
-  const showsExercises = ['strength', 'mixed'].includes(form.workoutType);
+  const workoutType = normalizeWorkoutType(form.workoutType);
+  const showsExercises = ['strength', 'mixed'].includes(workoutType);
+  const showsActivities = ['cardio', 'sport', 'mixed'].includes(workoutType);
+  const showsSimpleDuration = ['mobility', 'other'].includes(workoutType);
   const [activeSetByExercise, setActiveSetByExercise] = React.useState({});
 
   function updateExercise(index, field, value) {
@@ -1472,11 +1541,38 @@ function WorkoutFields({ form, update }) {
     );
   }
 
+  function updateActivity(index, field, value) {
+    const activities = [...(form.activities || [])];
+    activities[index] = { ...normalizeActivity(activities[index]), [field]: value };
+    update('activities', activities);
+  }
+
+  function addActivity() {
+    update('activities', [
+      ...(form.activities || []),
+      {
+        id: crypto.randomUUID(),
+        name: '',
+        durationMinutes: '',
+        distanceMiles: '',
+        effort: '',
+        notes: ''
+      }
+    ]);
+  }
+
+  function removeActivity(index) {
+    update(
+      'activities',
+      (form.activities || []).filter((_, currentIndex) => currentIndex !== index)
+    );
+  }
+
   return (
     <>
       <label>
         Workout type
-        <select value={form.workoutType} onChange={(event) => update('workoutType', event.target.value)}>
+        <select value={workoutType} onChange={(event) => update('workoutType', event.target.value)}>
           {WORKOUT_TYPES.map((type) => (
             <option key={type} value={type}>
               {type}
@@ -1495,29 +1591,17 @@ function WorkoutFields({ form, update }) {
         />
         <span className="range-value">{form.effort}/5</span>
       </label>
-      {showsDistance && (
-        <>
-          <label>
-            Distance
-            <input
-              type="number"
-              inputMode="decimal"
-              value={form.distanceMiles}
-              onChange={(event) => update('distanceMiles', event.target.value)}
-              placeholder="miles"
-            />
-          </label>
-          <label>
-            Duration
-            <input
-              type="number"
-              inputMode="decimal"
-              value={form.durationMinutes}
-              onChange={(event) => update('durationMinutes', event.target.value)}
-              placeholder="minutes"
-            />
-          </label>
-        </>
+      {showsSimpleDuration && (
+        <label>
+          Duration
+          <input
+            type="number"
+            inputMode="decimal"
+            value={form.durationMinutes}
+            onChange={(event) => update('durationMinutes', event.target.value)}
+            placeholder="minutes"
+          />
+        </label>
       )}
       {showsExercises && (
         <div className="workout-builder wide">
@@ -1594,6 +1678,75 @@ function WorkoutFields({ form, update }) {
                 />
               </label>
               <button type="button" className="icon-only exercise-remove" title="Remove exercise" onClick={() => removeExercise(index)}>
+                <Trash2 size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {showsActivities && (
+        <div className="workout-builder wide">
+          <div className="section-title">
+            <h3>{workoutType === 'mixed' ? 'Activities' : 'Activities'}</h3>
+            <button type="button" className="secondary-button" onClick={addActivity}>
+              <Plus size={16} />
+              Add activity
+            </button>
+          </div>
+          {(form.activities || []).length === 0 && (
+            <p className="muted-text">Add activities if you want to track duration, distance, or effort.</p>
+          )}
+          {(form.activities || []).map((activity, index) => (
+            <div className="activity-row" key={activity.id || index}>
+              <label>
+                Activity
+                <input
+                  value={activity.name}
+                  onChange={(event) => updateActivity(index, 'name', event.target.value)}
+                  placeholder={workoutType === 'sport' ? 'soccer, basketball, tennis...' : 'run, bike, row, intervals...'}
+                />
+              </label>
+              <label>
+                Duration
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={activity.durationMinutes}
+                  onChange={(event) => updateActivity(index, 'durationMinutes', event.target.value)}
+                  placeholder="minutes"
+                />
+              </label>
+              <label>
+                Distance
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={activity.distanceMiles}
+                  onChange={(event) => updateActivity(index, 'distanceMiles', event.target.value)}
+                  placeholder="miles"
+                />
+              </label>
+              <label>
+                Effort
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="1"
+                  max="5"
+                  value={activity.effort}
+                  onChange={(event) => updateActivity(index, 'effort', event.target.value)}
+                  placeholder="1-5"
+                />
+              </label>
+              <label className="wide">
+                Activity notes
+                <input
+                  value={activity.notes}
+                  onChange={(event) => updateActivity(index, 'notes', event.target.value)}
+                  placeholder="pace, intervals, position, conditions..."
+                />
+              </label>
+              <button type="button" className="icon-only exercise-remove" title="Remove activity" onClick={() => removeActivity(index)}>
                 <Trash2 size={16} />
               </button>
             </div>
@@ -1721,10 +1874,12 @@ function EntryList({ entries, canEditDay, onEdit, onDelete }) {
 }
 
 function WorkoutSummary({ entry }) {
+  const activities = (entry.activities || []).map(normalizeActivity);
+  const hasStructuredWork = entry.exercises?.length > 0 || activities.length > 0;
   const stats = [
-    entry.workoutType,
-    entry.distanceMiles != null ? `${entry.distanceMiles} mi` : '',
-    entry.durationMinutes != null ? `${entry.durationMinutes} min` : '',
+    normalizeWorkoutType(entry.workoutType),
+    !hasStructuredWork && entry.distanceMiles != null ? `${entry.distanceMiles} mi` : '',
+    !hasStructuredWork && entry.durationMinutes != null ? `${entry.durationMinutes} min` : '',
     entry.effort ? `effort ${entry.effort}/5` : ''
   ].filter(Boolean);
 
@@ -1740,9 +1895,26 @@ function WorkoutSummary({ entry }) {
           ))}
         </div>
       )}
+      {activities.length > 0 && (
+        <div className="exercise-summary-list">
+          {activities.map((activity) => (
+            <span key={activity.id || activity.name}>{formatActivitySummary(activity)}</span>
+          ))}
+        </div>
+      )}
       {entry.notes && <p>{entry.notes}</p>}
     </div>
   );
+}
+
+function formatActivitySummary(activity) {
+  const normalized = normalizeActivity(activity);
+  const details = [
+    normalized.durationMinutes !== '' && normalized.durationMinutes != null ? `${normalized.durationMinutes} min` : '',
+    normalized.distanceMiles !== '' && normalized.distanceMiles != null ? `${normalized.distanceMiles} mi` : '',
+    normalized.effort !== '' && normalized.effort != null ? `effort ${normalized.effort}` : ''
+  ].filter(Boolean);
+  return [normalized.name, details.join(', ')].filter(Boolean).join(' ');
 }
 
 function formatExerciseSummary(exercise) {
@@ -2295,13 +2467,14 @@ function toCsv(data) {
     'duration_minutes',
     'effort',
     'exercises',
+    'activities',
     'notes',
     'has_photo'
   ];
   const rows = [headers];
   Object.entries(data.days).forEach(([dateKey, day]) => {
     if (!day.entries.length) {
-      rows.push([dateKey, day.weight, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+      rows.push([dateKey, day.weight, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
     }
     day.entries.forEach((entry) => {
       rows.push([
@@ -2328,6 +2501,7 @@ function toCsv(data) {
         entry.durationMinutes,
         entry.effort,
         formatExercisesCsv(entry.exercises),
+        formatActivitiesCsv(entry.activities),
         entry.notes,
         entry.photo ? 'yes' : 'no'
       ]);
@@ -2354,6 +2528,21 @@ function formatExercisesCsv(exercises = []) {
         })
         .join('; ');
       return [normalized.name, performance, setDetails, normalized.notes].filter(Boolean).join(' ');
+    })
+    .join('; ');
+}
+
+function formatActivitiesCsv(activities = []) {
+  return activities
+    .map((activity) => {
+      const normalized = normalizeActivity(activity);
+      const details = [
+        normalized.durationMinutes !== '' && normalized.durationMinutes != null ? `${normalized.durationMinutes} min` : '',
+        normalized.distanceMiles !== '' && normalized.distanceMiles != null ? `${normalized.distanceMiles} mi` : '',
+        normalized.effort !== '' && normalized.effort != null ? `effort ${normalized.effort}` : '',
+        normalized.notes
+      ].filter(Boolean);
+      return [normalized.name, details.join(' / ')].filter(Boolean).join(' ');
     })
     .join('; ');
 }
