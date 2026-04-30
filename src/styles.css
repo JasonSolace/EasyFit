@@ -699,6 +699,15 @@ textarea {
     align-items: start;
   }
 
+  .app-title {
+    display: grid;
+    gap: 2px;
+  }
+
+  .app-title small {
+    line-height: 1.15;
+  }
+
   .settings-menu {
     justify-self: end;
   }
