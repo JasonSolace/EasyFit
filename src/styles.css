@@ -451,6 +451,53 @@ textarea {
   margin-bottom: 1px;
 }
 
+.set-controls {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.set-chip-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(42px, 1fr));
+  gap: 6px;
+}
+
+.set-chip {
+  min-height: 42px;
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  padding: 5px 6px;
+  border: 1px solid #d9d5cc;
+  border-radius: 8px;
+  background: #f7f4ed;
+  color: #4d5753;
+}
+
+.set-chip.active {
+  border-color: #27594d;
+  background: #eef5f1;
+  color: #27594d;
+}
+
+.set-chip.has-override {
+  font-weight: 800;
+}
+
+.set-chip span {
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.set-chip small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+}
+
 .primary-button {
   width: 100%;
   min-height: 44px;

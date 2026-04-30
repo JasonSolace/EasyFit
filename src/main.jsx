@@ -170,6 +170,43 @@ function numberOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function getSetCount(exercise) {
+  const sets = Number(exercise.sets);
+  if (!Number.isFinite(sets) || sets < 1) return 0;
+  return Math.min(Math.floor(sets), 20);
+}
+
+function normalizeSetDetails(exercise) {
+  const count = getSetCount(exercise);
+  const details = Array.isArray(exercise.setDetails) ? exercise.setDetails : [];
+  return Array.from({ length: count }, (_, index) => ({
+    id: details[index]?.id || crypto.randomUUID(),
+    reps: details[index]?.reps ?? '',
+    weight: details[index]?.weight ?? ''
+  }));
+}
+
+function normalizeExercise(exercise) {
+  return {
+    id: exercise.id || crypto.randomUUID(),
+    name: exercise.name || '',
+    sets: exercise.sets ?? '',
+    reps: exercise.reps ?? '',
+    weight: exercise.weight ?? '',
+    unit: exercise.unit || 'lb',
+    notes: exercise.notes || '',
+    setDetails: normalizeSetDetails(exercise)
+  };
+}
+
+function cleanSetDetails(exercise) {
+  return normalizeSetDetails(exercise).map((set) => ({
+    id: set.id || crypto.randomUUID(),
+    reps: numberOrNull(set.reps),
+    weight: numberOrNull(set.weight)
+  }));
+}
+
 function cleanEntry(form) {
   const type = form.type === 'activity' ? 'workout' : form.type;
   const base = {
@@ -228,7 +265,8 @@ function cleanEntry(form) {
           reps: numberOrNull(exercise.reps),
           weight: numberOrNull(exercise.weight),
           unit: exercise.unit || 'lb',
-          notes: exercise.notes.trim()
+          notes: exercise.notes.trim(),
+          setDetails: cleanSetDetails(exercise)
         }))
     };
   }
@@ -280,7 +318,7 @@ function entryToForm(entry) {
     sugar: entry.sugar ?? '',
     distanceMiles: entry.distanceMiles ?? '',
     durationMinutes: entry.durationMinutes ?? '',
-    exercises: entry.exercises ?? []
+    exercises: (entry.exercises ?? []).map(normalizeExercise)
   };
 }
 
@@ -300,7 +338,11 @@ function makeWorkoutTemplate(entry) {
       reps: exercise.reps ?? '',
       weight: '',
       unit: exercise.unit || 'lb',
-      notes: ''
+      notes: '',
+      setDetails: normalizeSetDetails({ ...exercise, weight: '' }).map((set) => ({
+        ...set,
+        weight: ''
+      }))
     }))
   };
 }
@@ -317,7 +359,12 @@ function applyWorkoutTemplate(form, template) {
       ...exercise,
       id: crypto.randomUUID(),
       weight: '',
-      notes: ''
+      notes: '',
+      setDetails: normalizeSetDetails({ ...exercise, weight: '' }).map((set) => ({
+        ...set,
+        id: crypto.randomUUID(),
+        weight: ''
+      }))
     }))
   };
 }
@@ -381,10 +428,28 @@ function getWeekKeys(dateKey) {
   return Array.from({ length: 7 }, (_, index) => toDateKey(addDays(start, index)));
 }
 
+function hasDailyLog(day) {
+  return Boolean(day.weight) || day.entries.length > 0;
+}
+
+function getLogStreak(data, anchorKey = todayKey()) {
+  let streak = 0;
+  let current = fromDateKey(anchorKey > todayKey() ? todayKey() : anchorKey);
+
+  while (hasDailyLog(getDay(data, toDateKey(current)))) {
+    streak += 1;
+    current = addDays(current, -1);
+  }
+
+  return streak;
+}
+
 function analyzeWeek(data, selectedDate) {
   const keys = getWeekKeys(selectedDate);
   const days = keys.map((key) => ({ key, day: getDay(data, key) }));
   const entries = days.flatMap(({ key, day }) => day.entries.map((entry) => ({ ...entry, dateKey: key })));
+  const loggedDays = days.filter(({ day }) => hasDailyLog(day)).map(({ key }) => key);
+  const logStreak = getLogStreak(data);
   const weights = days.map(({ day }) => Number(day.weight)).filter((value) => Number.isFinite(value) && value > 0);
   const avgWeight = weights.length ? weights.reduce((a, b) => a + b, 0) / weights.length : null;
   const mainMeals = entries.filter((entry) => MAIN_MEALS.includes(entry.type));
@@ -397,15 +462,13 @@ function analyzeWeek(data, selectedDate) {
     return acc;
   }, {});
   const commonTimes = Object.entries(bucketCounts).sort((a, b) => b[1] - a[1]);
-  const incompleteDays = days
-    .filter(({ day }) => MAIN_MEALS.some((meal) => !day.entries.some((entry) => entry.type === meal)))
-    .map(({ key }) => key);
-  const largeMeals = mainMeals.filter((entry) => entry.portion === 'large' || entry.portion === 'extra large');
   const highStressCravings = cravings.filter((entry) => entry.moodStress === 'high');
 
   return {
     keys,
     entries,
+    loggedDays,
+    logStreak,
     avgWeight,
     weights,
     mainMeals,
@@ -413,8 +476,6 @@ function analyzeWeek(data, selectedDate) {
     cravings,
     workouts,
     commonTimes,
-    incompleteDays,
-    largeMeals,
     highStressCravings,
     calories: sumOptional(entries, 'calories'),
     protein: sumOptional(entries, 'protein'),
@@ -1345,11 +1406,47 @@ function NutritionFields({ form, update }) {
 function WorkoutFields({ form, update }) {
   const showsDistance = ['run / walk', 'cardio', 'mixed'].includes(form.workoutType);
   const showsExercises = ['strength', 'mixed'].includes(form.workoutType);
+  const [activeSetByExercise, setActiveSetByExercise] = React.useState({});
 
   function updateExercise(index, field, value) {
     const exercises = [...form.exercises];
-    exercises[index] = { ...exercises[index], [field]: value };
+    const nextExercise = normalizeExercise({ ...exercises[index], [field]: value });
+    exercises[index] = field === 'sets' ? nextExercise : { ...exercises[index], [field]: value };
     update('exercises', exercises);
+  }
+
+  function updatePerformanceField(index, field, value) {
+    const exercises = [...form.exercises];
+    const exercise = normalizeExercise(exercises[index]);
+    const activeSetIndex = getActiveSetIndex(exercise, index);
+    const setDetails = normalizeSetDetails(exercise);
+    const hasDefault = exercise[field] !== '' && exercise[field] != null;
+    const hasSetOverride = setDetails.some((set) => set[field] !== '' && set[field] != null);
+
+    if (activeSetIndex < 0 || (!hasDefault && !hasSetOverride)) {
+      exercises[index] = { ...exercise, [field]: value };
+    } else {
+      setDetails[activeSetIndex] = { ...setDetails[activeSetIndex], [field]: value };
+      exercises[index] = { ...exercise, setDetails };
+    }
+    update('exercises', exercises);
+  }
+
+  function getPerformanceValue(exercise, exerciseIndex, field) {
+    const normalized = normalizeExercise(exercise);
+    const activeSetIndex = getActiveSetIndex(normalized, exerciseIndex);
+    if (activeSetIndex < 0) return normalized[field];
+
+    const set = normalizeSetDetails(normalized)[activeSetIndex];
+    return set?.[field] !== '' && set?.[field] != null ? set[field] : normalized[field];
+  }
+
+  function getActiveSetIndex(exercise, exerciseIndex) {
+    const count = getSetCount(exercise);
+    if (!count) return -1;
+    const key = exercise.id || exerciseIndex;
+    const active = activeSetByExercise[key] ?? 0;
+    return Math.min(active, count - 1);
   }
 
   function addExercise() {
@@ -1362,7 +1459,8 @@ function WorkoutFields({ form, update }) {
         reps: '',
         weight: '',
         unit: 'lb',
-        notes: ''
+        notes: '',
+        setDetails: []
       }
     ]);
   }
@@ -1451,23 +1549,33 @@ function WorkoutFields({ form, update }) {
                   value={exercise.sets}
                   onChange={(event) => updateExercise(index, 'sets', event.target.value)}
                 />
+                <SetControls
+                  exercise={normalizeExercise(exercise)}
+                  activeSetIndex={getActiveSetIndex(exercise, index)}
+                  onSelect={(setIndex) =>
+                    setActiveSetByExercise((current) => ({
+                      ...current,
+                      [exercise.id || index]: setIndex
+                    }))
+                  }
+                />
               </label>
               <label>
                 Reps
-                <input
+                <CommitInput
                   type="number"
                   inputMode="decimal"
-                  value={exercise.reps}
-                  onChange={(event) => updateExercise(index, 'reps', event.target.value)}
+                  value={getPerformanceValue(exercise, index, 'reps')}
+                  onCommit={(value) => updatePerformanceField(index, 'reps', value)}
                 />
               </label>
               <label>
                 Weight
-                <input
+                <CommitInput
                   type="number"
                   inputMode="decimal"
-                  value={exercise.weight}
-                  onChange={(event) => updateExercise(index, 'weight', event.target.value)}
+                  value={getPerformanceValue(exercise, index, 'weight')}
+                  onCommit={(value) => updatePerformanceField(index, 'weight', value)}
                 />
               </label>
               <label>
@@ -1494,6 +1602,68 @@ function WorkoutFields({ form, update }) {
       )}
     </>
   );
+}
+
+function CommitInput({ value, onCommit, ...props }) {
+  const [draft, setDraft] = React.useState(value ?? '');
+
+  React.useEffect(() => {
+    setDraft(value ?? '');
+  }, [value]);
+
+  function commit() {
+    if (String(draft) !== String(value ?? '')) {
+      onCommit(draft);
+    }
+  }
+
+  return (
+    <input
+      {...props}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          commit();
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+function SetControls({ exercise, activeSetIndex, onSelect }) {
+  const setCount = getSetCount(exercise);
+  if (!setCount) return null;
+
+  const setDetails = normalizeSetDetails(exercise);
+  const hasOverrides = (set) => Boolean(set.reps || set.weight);
+
+  return (
+    <div className="set-controls">
+      <div className="set-chip-row">
+        {setDetails.map((set, setIndex) => (
+          <button
+            key={set.id || setIndex}
+            type="button"
+            className={`set-chip${setIndex === activeSetIndex ? ' active' : ''}${hasOverrides(set) ? ' has-override' : ''}`}
+            onClick={() => onSelect(setIndex)}
+          >
+            <span>{setIndex + 1}</span>
+            <small>{formatSetChip(set, exercise)}</small>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function formatSetChip(set, exercise) {
+  const reps = set.reps || exercise.reps;
+  const weight = set.weight || exercise.weight;
+  const parts = [reps ? `${reps}r` : '', weight ? `${weight}${exercise.unit}` : ''].filter(Boolean);
+  return parts.join(' / ') || 'set';
 }
 
 function EntryList({ entries, canEditDay, onEdit, onDelete }) {
@@ -1565,9 +1735,7 @@ function WorkoutSummary({ entry }) {
         <div className="exercise-summary-list">
           {entry.exercises.map((exercise) => (
             <span key={exercise.id || exercise.name}>
-              {exercise.name}
-              {exercise.sets || exercise.reps ? `: ${exercise.sets || '-'}x${exercise.reps || '-'}` : ''}
-              {exercise.weight ? ` @ ${exercise.weight} ${exercise.unit || 'lb'}` : ''}
+              {formatExerciseSummary(exercise)}
             </span>
           ))}
         </div>
@@ -1575,6 +1743,32 @@ function WorkoutSummary({ entry }) {
       {entry.notes && <p>{entry.notes}</p>}
     </div>
   );
+}
+
+function formatExerciseSummary(exercise) {
+  const normalized = normalizeExercise(exercise);
+  const setDetails = normalizeSetDetails(normalized);
+  const reps = formatSetValues(setDetails, normalized.reps, (set) => set.reps, '');
+  const weights = formatSetValues(setDetails, normalized.weight, (set) => set.weight, normalized.unit);
+  const performance = [
+    normalized.sets || reps ? `${normalized.sets || '-'}x${reps || '-'}` : '',
+    weights ? `@ ${weights}` : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return [normalized.name, performance].filter(Boolean).join(' ');
+}
+
+function formatSetValues(setDetails, fallback, selector, suffix) {
+  const values = setDetails.length ? setDetails.map((set) => selector(set) || fallback).filter((value) => value !== '' && value != null) : [];
+  if (!values.length && fallback !== '' && fallback != null) values.push(fallback);
+  const uniqueValues = [];
+  values.forEach((value) => {
+    const text = String(value);
+    if (!uniqueValues.includes(text)) uniqueValues.push(text);
+  });
+  return uniqueValues.map((value) => `${value}${suffix}`).join(', ');
 }
 
 function NutritionSummary({ entry }) {
@@ -1607,9 +1801,9 @@ function WeeklyReview({ data, selectedDate }) {
       </div>
       <section className="metrics-grid">
         <Metric label="Average weight" value={analysis.avgWeight ? `${analysis.avgWeight.toFixed(1)} lb` : 'none'} />
+        <Metric label="Current streak" value={`${analysis.logStreak} day${analysis.logStreak === 1 ? '' : 's'}`} />
         <Metric label="Meals logged" value={analysis.mainMeals.length} />
         <Metric label="Snacks" value={analysis.snacks.length} />
-        <Metric label="Cravings" value={analysis.cravings.length} />
         <Metric label="Workouts" value={analysis.workouts.length} />
       </section>
       <section className="panel">
@@ -1618,9 +1812,9 @@ function WeeklyReview({ data, selectedDate }) {
           <span>{analysis.entries.length} total entries</span>
         </div>
         <div className="review-grid">
+          <ReviewBlock title="Days logged" value={`${analysis.loggedDays.length} of 7`} />
           <ReviewBlock title="Snack / craving times" value={formatCommonTimes(analysis.commonTimes)} />
-          <ReviewBlock title="Incomplete logs" value={analysis.incompleteDays.length ? analysis.incompleteDays.map(formatDay).join(', ') : 'none'} />
-          <ReviewBlock title="Large main meals" value={`${analysis.largeMeals.length} logged`} />
+          <ReviewBlock title="Cravings" value={analysis.cravings.length} />
           <ReviewBlock title="Optional nutrition" value={formatNutritionTotals(analysis)} />
         </div>
       </section>
@@ -1668,21 +1862,20 @@ function buildSuggestions(analysis, previous) {
   if (analysis.avgWeight != null && previous.avgWeight != null) {
     const delta = analysis.avgWeight - previous.avgWeight;
     if (Math.abs(delta) < 0.3) {
-      suggestions.push('Your weight stayed about the same this week. Consider slightly reducing portions on repeated large meals.');
+      suggestions.push('Your weight stayed about the same this week. Keep watching the patterns that feel repeatable.');
     } else if (delta < 0) {
       suggestions.push('Your weekly average weight moved down. Keep the habits that felt repeatable.');
     } else {
-      suggestions.push('Your weekly average weight moved up. Look for extra snacks, drinks, or repeated large portions before making bigger changes.');
+      suggestions.push('Your weekly average weight moved up. Look for extra snacks, drinks, or schedule changes before making bigger changes.');
     }
   }
   if (analysis.highStressCravings.length) {
     suggestions.push('You had several cravings during high-stress periods.');
   }
-  if (analysis.incompleteDays.length <= 1 && analysis.entries.length >= 10) {
-    suggestions.push('Your logs were consistent this week.');
-  }
-  if (analysis.largeMeals.length >= 4) {
-    suggestions.push('Several main meals were marked large or extra large. Compare photos and try one small portion adjustment next week.');
+  if (analysis.logStreak >= 3) {
+    suggestions.push(`You have a ${analysis.logStreak}-day logging streak. Any entry counts.`);
+  } else if (analysis.loggedDays.length >= 4) {
+    suggestions.push(`You logged something on ${analysis.loggedDays.length} days this week.`);
   }
   if (!suggestions.length) {
     suggestions.push('Log a few more meals, snacks, cravings, and weights to generate useful weekly feedback.');
@@ -2146,13 +2339,21 @@ function toCsv(data) {
 function formatExercisesCsv(exercises = []) {
   return exercises
     .map((exercise) => {
+      const normalized = normalizeExercise(exercise);
       const performance = [
-        exercise.sets || exercise.reps ? `${exercise.sets || '-'}x${exercise.reps || '-'}` : '',
-        exercise.weight ? `${exercise.weight} ${exercise.unit || 'lb'}` : ''
+        normalized.sets || normalized.reps ? `${normalized.sets || '-'}x${normalized.reps || '-'}` : '',
+        normalized.weight ? `${normalized.weight} ${normalized.unit || 'lb'}` : ''
       ]
         .filter(Boolean)
         .join(' @ ');
-      return [exercise.name, performance, exercise.notes].filter(Boolean).join(' ');
+      const setDetails = normalizeSetDetails(normalized)
+        .filter((set) => set.reps || set.weight)
+        .map((set, index) => {
+          const parts = [set.reps ? `${set.reps} reps` : '', set.weight ? `${set.weight} ${normalized.unit}` : ''].filter(Boolean);
+          return `set ${index + 1}: ${parts.join(' / ')}`;
+        })
+        .join('; ');
+      return [normalized.name, performance, setDetails, normalized.notes].filter(Boolean).join(' ');
     })
     .join('; ');
 }
