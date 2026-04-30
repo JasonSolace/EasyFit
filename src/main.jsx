@@ -1922,7 +1922,7 @@ async function loadDriveBackup(token) {
 
   if (!response.ok) {
     localStorage.removeItem(GOOGLE_DRIVE_FILE_ID_KEY);
-    throw new Error('Could not download the Google Drive backup.');
+    throw await makeGoogleApiError(response, 'Could not download the Google Drive backup.');
   }
 
   return response.json();
@@ -1940,7 +1940,9 @@ async function findDriveBackup(token) {
     }
   );
 
-  if (!response.ok) return null;
+  if (!response.ok) {
+    throw await makeGoogleApiError(response, 'Could not search Google Drive for the backup.');
+  }
   const payload = await response.json();
   return payload.files?.[0] || null;
 }
@@ -1996,10 +1998,29 @@ async function uploadDriveFile({ token, method, url, metadata, data }) {
   });
 
   if (!response.ok) {
-    throw new Error('Could not save the Google Drive backup.');
+    throw await makeGoogleApiError(response, 'Could not save the Google Drive backup.');
   }
 
   return response.json();
+}
+
+async function makeGoogleApiError(response, fallbackMessage) {
+  let detail = '';
+
+  try {
+    const payload = await response.clone().json();
+    const error = payload.error;
+    const reason = error?.errors?.map((item) => item.reason).filter(Boolean).join(', ');
+    detail = [error?.message, reason ? `Reason: ${reason}` : ''].filter(Boolean).join(' ');
+  } catch {
+    try {
+      detail = await response.text();
+    } catch {
+      detail = '';
+    }
+  }
+
+  return new Error([`${fallbackMessage} (${response.status})`, detail].filter(Boolean).join(' '));
 }
 
 async function lookupOpenFoodFacts(code) {
